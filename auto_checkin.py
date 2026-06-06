@@ -97,7 +97,7 @@ class KurobbsClient:
         mine_info = self.get_mine_info()
         user_game_list = self.get_user_game_list(user_id=mine_info.get("mine", {}).get("userId", 0))
 
-        beijing_tz = ZoneInfo("Asia/Shanghai")
+        beijing_tz = ZoneShiftInfo("Asia/Shanghai")
         beijing_time = datetime.now(beijing_tz)
 
         role_list = user_game_list.get("defaultRoleList") or []
@@ -135,6 +135,7 @@ class KurobbsClient:
 
     def start(self):
         """Start the sign-in process."""
+        logger.info(f"开始处理账号: {self.token[:10]}...") # 打印token前10位用于区分
         self._process_sign_action(
             action_name="checkin",
             action_method=self.checkin,
@@ -165,10 +166,24 @@ class KurobbsClient:
 
 def main():
     # Configure logging as early as possible to avoid leaking secrets in GitHub Actions logs.
+    # 获取环境变量中的TOKEN
+    token_str = os.getenv("TOKEN", "").strip()
+    if not token_str:
+        logger.error("TOKEN environment variable is not set.")
+        sys.exit(1)
+
+    # 将字符串按逗号分割成列表，并去除首尾空格
+    tokens = [token.strip() for token in token_str.split(",") if token.strip()]
+    
+    if not tokens:
+        logger.error("No valid tokens found in TOKEN environment variable.")
+        sys.exit(1)
+
+    # 配置日志记录器
     configure_logger(
         debug=parse_bool(os.getenv("DEBUG", "")),
         secrets=[
-            os.getenv("TOKEN", ""),
+            token_str, # 将原始字符串加入脱敏列表
             os.getenv("BARK_DEVICE_KEY", ""),
             os.getenv("BARK_SERVER_URL", ""),
             os.getenv("SERVER3_SEND_KEY", ""),
@@ -182,19 +197,43 @@ def main():
         sys.exit(1)
 
     notifier = NotificationService(settings)
+    
+    # 总结所有账号的结果
+    all_results = []
+    all_exceptions = []
 
-    try:
-        kurobbs = KurobbsClient(settings.token)
-        kurobbs.start()
-        if kurobbs.msg:
-            notifier.send(kurobbs.msg)
-    except KurobbsClientException as e:
-        logger.error(str(e))
-        notifier.send(str(e))
-        sys.exit(1)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("An unexpected error occurred: {}", e)
-        sys.exit(1)
+    # 遍历每个Token进行处理
+    for i, token in enumerate(tokens, 1):
+        logger.info(f"处理第 {i} 个账号")
+        try:
+            kurobbs = KurobbsClient(token)
+            kurobbs.start()
+            if kurobbs.msg:
+                all_results.append(f"账号{i}: {kurobbs.msg}")
+        except KurobbsClientException as e:
+            error_msg = f"账号{i} 错误: {str(e)}"
+            logger.error(error_msg)
+            all_exceptions.append(error_msg)
+        except Exception as e:  # noqa: BLE001
+            error_msg = f"账号{i} 发生未预期错误: {str(e)}"
+            logger.exception(error_msg)
+            all_exceptions.append(error_msg)
+
+      if i < len(tokens):
+            logger.info("休眠60秒...")
+            time.sleep(60)
+
+    # 发送最终通知
+    final_message = ""
+    if all_results:
+        final_message += "✅ 签到成功汇总:\n" + "\n".join(all_results) + "\n\n"
+    if all_exceptions:
+        final_message += "❌ 失败汇总:\n" + "\n".join(all_exceptions)
+
+    if final_message:
+        notifier.send(final_message)
+    elif not all_results: # 如果没有成功也没有失败（理论上不太可能）
+        notifier.send("所有账号签到任务已完成，但未获取到具体结果。")
 
 
 if __name__ == "__main__":

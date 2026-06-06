@@ -222,9 +222,10 @@ def main():
             error_msg = f"账号{i} 发生未预期错误: {str(e)}"
             logger.exception(error_msg)
             all_exceptions.append(error_msg)
-
-      if i < len(tokens):
-            logger.info("休眠60秒...")
+            
+        # ✅ 检查这里的缩进：它应该与上面的 try 和 except 处于同一层级（即都在 for 循环内部）
+        if i < len(tokens):
+            logger.info("已完成当前账号，为避免触发风控，休眠60秒...")
             time.sleep(60)
 
     # 发送最终通知

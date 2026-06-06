@@ -81,8 +81,12 @@ class KurobbsClient:
     def get_mine_info(self, type: int = 1) -> Dict[str, Any]:
         """Get mine info."""
         res = self._post(self.USER_MINE_URL, {"type": type})
+        
+        # ✅ 优化：如果 data 为空，抛出包含具体 code 和 msg 的异常
         if not res.data:
-            raise KurobbsClientException("User info is missing in response.")
+            raise KurobbsClientException(
+                f"User info is missing in response. (Server returned: code={res.code}, msg={res.msg})"
+            )
         return res.data
 
     def get_user_game_list(self, user_id: int) -> Dict[str, Any]:

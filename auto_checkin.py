@@ -1,5 +1,6 @@
 import os
 import sys
+import time  # ✅ 新增：导入 time 模块以支持休眠
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -82,7 +83,7 @@ class KurobbsClient:
         """Get mine info."""
         res = self._post(self.USER_MINE_URL, {"type": type})
         
-        # ✅ 优化：如果 data 为空，抛出包含具体 code 和 msg 的异常
+        # ✅ 优化：如果 data 为空，抛出包含具体 code 和 msg 的异常，方便排查
         if not res.data:
             raise KurobbsClientException(
                 f"User info is missing in response. (Server returned: code={res.code}, msg={res.msg})"
@@ -101,7 +102,8 @@ class KurobbsClient:
         mine_info = self.get_mine_info()
         user_game_list = self.get_user_game_list(user_id=mine_info.get("mine", {}).get("userId", 0))
 
-        beijing_tz = ZoneShiftInfo("Asia/Shanghai")
+        
+        beijing_tz = ZoneInfo("Asia/Shanghai")
         beijing_time = datetime.now(beijing_tz)
 
         role_list = user_game_list.get("defaultRoleList") or []
@@ -139,7 +141,7 @@ class KurobbsClient:
 
     def start(self):
         """Start the sign-in process."""
-        logger.info(f"开始处理账号: {self.token[:10]}...") # 打印token前10位用于区分
+        logger.info(f"开始处理账号: {self.token[:10]}...")
         self._process_sign_action(
             action_name="checkin",
             action_method=self.checkin,
@@ -170,7 +172,6 @@ class KurobbsClient:
 
 def main():
     # Configure logging as early as possible to avoid leaking secrets in GitHub Actions logs.
-    # 获取环境变量中的TOKEN
     token_str = os.getenv("TOKEN", "").strip()
     if not token_str:
         logger.error("TOKEN environment variable is not set.")
@@ -183,11 +184,10 @@ def main():
         logger.error("No valid tokens found in TOKEN environment variable.")
         sys.exit(1)
 
-    # 配置日志记录器
     configure_logger(
         debug=parse_bool(os.getenv("DEBUG", "")),
         secrets=[
-            token_str, # 将原始字符串加入脱敏列表
+            token_str,
             os.getenv("BARK_DEVICE_KEY", ""),
             os.getenv("BARK_SERVER_URL", ""),
             os.getenv("SERVER3_SEND_KEY", ""),
@@ -202,7 +202,6 @@ def main():
 
     notifier = NotificationService(settings)
     
-    # 总结所有账号的结果
     all_results = []
     all_exceptions = []
 
@@ -223,7 +222,7 @@ def main():
             logger.exception(error_msg)
             all_exceptions.append(error_msg)
             
-        # ✅ 检查这里的缩进：它应该与上面的 try 和 except 处于同一层级（即都在 for 循环内部）
+        # ✅ 新增：如果当前不是最后一个账号，则等待60秒后再处理下一个
         if i < len(tokens):
             logger.info("已完成当前账号，为避免触发风控，休眠60秒...")
             time.sleep(60)
@@ -237,7 +236,7 @@ def main():
 
     if final_message:
         notifier.send(final_message)
-    elif not all_results: # 如果没有成功也没有失败（理论上不太可能）
+    elif not all_results:
         notifier.send("所有账号签到任务已完成，但未获取到具体结果。")
 
 
